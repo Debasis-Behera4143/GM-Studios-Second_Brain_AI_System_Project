@@ -8,7 +8,7 @@ function App() {
 
   const addNote = async () => {
     try {
-      const res = await axios.post("http://localhost:8000/add_note", {
+      const res = await axios.post("http://127.0.0.1:8000/add_note", {
         content: note,
       });
 
@@ -20,7 +20,7 @@ function App() {
   };
   const askQuestion = async () => {
     try {
-      const res = await axios.post("http://localhost:8000/query", {
+      const res = await axios.post("http://127.0.0.1:8000/query", {
         query: query,
       });
 
