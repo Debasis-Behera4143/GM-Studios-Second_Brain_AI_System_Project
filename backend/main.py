@@ -31,7 +31,7 @@ def get_db():
     finally:
         db.close()
 
-# ➤ Add Note
+# Add Note
 @app.post("/add_note")
 def add_note(note: NoteRequest, db: Session = Depends(get_db)):
     new_note = Note(content=note.content)
@@ -44,7 +44,7 @@ def add_note(note: NoteRequest, db: Session = Depends(get_db)):
     return {"message": "Note added successfully"}
 
 
-# ➤ Query
+# Query
 class QueryRequest(BaseModel):
     query: str
 @app.post("/query")

@@ -24,7 +24,7 @@ function App() {
         query: query,
       });
 
-      console.log(res.data); // DEBUG
+      console.log(res.data); 
 
       setResponse(res.data.answer);
     } catch (err) {

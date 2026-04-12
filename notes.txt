@@ -1,0 +1,7 @@
+INSTALLING
+    pip install fastapi uvicorn sqlalchemy psycopg2-binary
+    pip install sentence-transformers chromadb openai
+
+DATABASE SETUP
+    db.py (PostgreSQL setup)
+    
