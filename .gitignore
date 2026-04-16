@@ -1,0 +1,8 @@
+backend/.env
+**/.env
+.venv/
+node_modules/
+.next/
+__pycache__/
+*.pyc
+temp_test_audio.wav
