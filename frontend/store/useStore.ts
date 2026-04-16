@@ -7,16 +7,26 @@ interface Message {
   sources?: any[];
 }
 
+interface ResurfaceSuggestion {
+  id: string;
+  content: string;
+}
+
 interface AppState {
   messages: Message[];
   isIngesting: boolean;
   isQuerying: boolean;
+  isFetchingSuggestions: boolean;
   isInitializing: boolean;
   sessionToken: string | null;
+  resurfacingSuggestions: ResurfaceSuggestion[];
   initializeSession: () => Promise<void>;
   addMessage: (msg: Message) => void;
   ingestNote: (content: string, type: string) => Promise<void>;
+  ingestFile: (file: File) => Promise<void>;
   queryRAG: (query: string) => Promise<void>;
+  queryByVoice: (file: File) => Promise<void>;
+  fetchResurfacing: () => Promise<void>;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
@@ -52,8 +62,10 @@ export const useStore = create<AppState>((set, get) => ({
   messages: [{ role: 'assistant', content: 'Hello! I am your Second Brain. How can I help you today?' }],
   isIngesting: false,
   isQuerying: false,
+  isFetchingSuggestions: false,
   isInitializing: false,
   sessionToken: null,
+  resurfacingSuggestions: [],
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
 
   initializeSession: async () => {
@@ -108,6 +120,7 @@ export const useStore = create<AppState>((set, get) => ({
         role: 'assistant',
         content: 'Your note was saved successfully. Ask a question about it any time.'
       });
+      await get().fetchResurfacing();
     } catch (error) {
       console.error(error);
       if (axios.isAxiosError(error) && error.response?.status === 401) {
@@ -123,6 +136,43 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  ingestFile: async (file) => {
+    set({ isIngesting: true });
+    try {
+      await get().initializeSession();
+      const token = get().sessionToken ?? readStoredSessionToken();
+
+      const data = new FormData();
+      data.append('file', file);
+      data.append('source_type', 'file');
+
+      await axios.post(`${API_BASE}/ingest/file`, data, {
+        headers: {
+          ...buildHeaders(token),
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      get().addMessage({
+        role: 'assistant',
+        content: `File \"${file.name}\" was ingested successfully.`
+      });
+      await get().fetchResurfacing();
+    } catch (error) {
+      console.error(error);
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        clearStoredSessionToken();
+        set({ sessionToken: null });
+      }
+      get().addMessage({
+        role: 'assistant',
+        content: 'I could not ingest that file right now.'
+      });
+    } finally {
+      set({ isIngesting: false });
+    }
+  },
+
   queryRAG: async (query) => {
     set({ isQuerying: true });
     get().addMessage({ role: 'user', content: query });
@@ -130,7 +180,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await get().initializeSession();
       let token = get().sessionToken ?? readStoredSessionToken();
-      const res = await axios.post(`${API_BASE}/query`, {
+      const res = await axios.post(`${API_BASE}/ask`, {
         query: query
       }, {
         headers: buildHeaders(token)
@@ -158,6 +208,61 @@ export const useStore = create<AppState>((set, get) => ({
       });
     } finally {
       set({ isQuerying: false });
+    }
+  },
+
+  queryByVoice: async (file) => {
+    set({ isQuerying: true });
+    try {
+      await get().initializeSession();
+      const token = get().sessionToken ?? readStoredSessionToken();
+      const data = new FormData();
+      data.append('file', file);
+
+      const res = await axios.post(`${API_BASE}/voice/query`, data, {
+        headers: {
+          ...buildHeaders(token),
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const answer =
+        typeof res.data?.answer === 'string' && res.data.answer.trim()
+          ? res.data.answer
+          : 'Voice query was processed, but the answer came back empty.';
+
+      get().addMessage({
+        role: 'assistant',
+        content: answer,
+        sources: Array.isArray(res.data?.sources) ? res.data.sources : []
+      });
+    } catch (error) {
+      console.error(error);
+      get().addMessage({
+        role: 'assistant',
+        content: 'I could not run the voice query right now.'
+      });
+    } finally {
+      set({ isQuerying: false });
+    }
+  },
+
+  fetchResurfacing: async () => {
+    set({ isFetchingSuggestions: true });
+    try {
+      await get().initializeSession();
+      const token = get().sessionToken ?? readStoredSessionToken();
+      const res = await axios.get(`${API_BASE}/resurface`, {
+        headers: buildHeaders(token)
+      });
+      set({
+        resurfacingSuggestions: Array.isArray(res.data?.suggestions) ? res.data.suggestions : []
+      });
+    } catch (error) {
+      console.error(error);
+      set({ resurfacingSuggestions: [] });
+    } finally {
+      set({ isFetchingSuggestions: false });
     }
   }
 }));

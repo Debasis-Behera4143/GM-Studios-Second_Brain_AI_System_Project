@@ -32,8 +32,10 @@ from api.ingest import router as ingest_router
 from api.query import router as query_router
 from api.session import router as session_router
 from api.voice import router as voice_router
+from api.resurface import router as resurface_router
 
 app.include_router(session_router, prefix="/api", tags=["session"])
 app.include_router(ingest_router, prefix="/api", tags=["ingest"])
 app.include_router(query_router, prefix="/api", tags=["query"])
 app.include_router(voice_router, prefix="/api", tags=["voice"])
+app.include_router(resurface_router, prefix="/api", tags=["resurface"])

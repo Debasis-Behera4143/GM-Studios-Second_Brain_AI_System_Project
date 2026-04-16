@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.1-8b-instant"
     FIREWORKS_API_KEY: str | None = None
     FIREWORKS_MODEL: str = "accounts/fireworks/models/llama-v3p1-8b-instruct"
+    ALLOW_GENERAL_ANSWER_WITHOUT_NOTES: bool = True
     ENABLE_RESURFACING_JOB: bool = False
     SECRET_KEY: str = Field(
         default="change-this-in-production-second-brain-secret",

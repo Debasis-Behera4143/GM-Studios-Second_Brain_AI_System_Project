@@ -78,6 +78,13 @@ def _build_fallback_answer(question: str, docs: list[str]) -> str:
     )
 
 
+def _build_not_enough_context_answer() -> str:
+    return (
+        "I could not find relevant notes for that question. "
+        "Save notes about this topic first, then ask again."
+    )
+
+
 def _normalize_text(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
@@ -259,6 +266,25 @@ Answer:
 """.strip()
 
 
+def _recent_conversation_context(db: Session, user_id: uuid.UUID, limit: int = 4) -> str:
+    rows = (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
+        .order_by(Conversation.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return ""
+
+    rows.reverse()
+    lines = []
+    for row in rows:
+        lines.append(f"User: {row.query}")
+        lines.append(f"Assistant: {row.response}")
+    return "\n".join(lines)
+
+
 def _build_general_prompt(question: str) -> str:
     return f"""
 You are a helpful assistant.
@@ -303,18 +329,29 @@ def generate_rag_response(db: Session, user_id: uuid.UUID, request: QueryRequest
         docs, ids, distances = _retrieve_from_database(db, user_id, request)
 
     if not docs:
-        answer = call_llm(_build_general_prompt(request.query), request.query, [])
+        if settings.ALLOW_GENERAL_ANSWER_WITHOUT_NOTES:
+            answer = call_llm(_build_general_prompt(request.query), request.query, [])
+        else:
+            answer = _build_not_enough_context_answer()
         save_conversation(db, user_id, request.query, answer)
         return QueryResponse(answer=answer, sources=[])
 
     has_meaningful_match = _has_meaningful_match(request.query, docs)
 
+    if not has_meaningful_match:
+        if settings.ALLOW_GENERAL_ANSWER_WITHOUT_NOTES:
+            answer = call_llm(_build_general_prompt(request.query), request.query, [])
+        else:
+            answer = _build_not_enough_context_answer()
+        save_conversation(db, user_id, request.query, answer)
+        return QueryResponse(answer=answer, sources=[])
+
+    history = _recent_conversation_context(db, user_id)
+    history_prefix = f"Recent conversation:\n{history}\n\n" if history else ""
+
     # 3. Construct prompt
-    llm_docs = docs if has_meaningful_match else []
-    if has_meaningful_match:
-        prompt = _build_notes_prompt(request.query, docs)
-    else:
-        prompt = _build_general_prompt(request.query)
+    llm_docs = docs
+    prompt = history_prefix + _build_notes_prompt(request.query, docs)
 
     # 4. Generate answer with Gemini
     answer = call_llm(prompt, request.query, llm_docs)

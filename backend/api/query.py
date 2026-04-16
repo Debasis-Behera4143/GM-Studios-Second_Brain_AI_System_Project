@@ -26,3 +26,22 @@ def query_notes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to answer that question right now.",
         )
+
+
+@router.post("/ask", response_model=QueryResponse)
+def ask_notes(
+    request: QueryRequest,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    try:
+        return generate_rag_response(db, user_id, request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        print(f"Ask failure: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to answer that question right now.",
+        )
