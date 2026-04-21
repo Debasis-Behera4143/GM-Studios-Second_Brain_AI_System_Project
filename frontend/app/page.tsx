@@ -2,7 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { Send, Plus, Mic, BrainCircuit, Upload, RefreshCw, Sparkles, Menu, X } from 'lucide-react';
+import { Send, Plus, Mic, BrainCircuit, Upload, RefreshCw, Sparkles, Menu, X, Square } from 'lucide-react';
+import { AudioRecorder, blobToFile, isAudioRecordingSupported } from '../lib/audioRecorder';
 
 const MessageBubble = React.memo(({ msg }: { msg: any }) => {
   const isUser = msg.role === 'user';
@@ -41,8 +42,14 @@ export default function Home() {
   const [saveText, setSaveText] = useState('');
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<'save' | 'upload' | 'resurface'>('save');
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [recordingMode, setRecordingMode] = useState<'microphone' | 'file' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const voiceInputRef = useRef<HTMLInputElement | null>(null);
+  const recorderRef = useRef<AudioRecorder | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [canRecord] = useState(isAudioRecordingSupported());
 
   const {
     messages,
@@ -66,6 +73,22 @@ export default function Home() {
     };
     void bootstrap();
   }, [initializeSession, fetchResurfacing]);
+
+  useEffect(() => {
+    return () => {
+      // Cleanup: stop recording and clear timer on unmount
+      if (isRecordingVoice && recorderRef.current) {
+        try {
+          recorderRef.current.stop();
+        } catch (error) {
+          console.error('Failed to stop recorder on unmount:', error);
+        }
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [isRecordingVoice]);
 
   const handleAsk = () => {
     if (!askText.trim() || isInitializing) return;
@@ -93,6 +116,64 @@ export default function Home() {
   };
 
   const handlePickVoice = () => {
+    if (canRecord) {
+      setRecordingMode('microphone');
+    } else {
+      setRecordingMode('file');
+    }
+  };
+
+  const handleStartRecording = async () => {
+    try {
+      const recorder = new AudioRecorder({
+        onStart: () => {
+          setIsRecordingVoice(true);
+          setRecordingTime(0);
+        },
+        onStop: () => {
+          setIsRecordingVoice(false);
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+          }
+        },
+        onError: (error) => {
+          console.error('Recording error:', error);
+          setIsRecordingVoice(false);
+          setRecordingMode(null);
+        },
+      });
+
+      await recorder.start();
+      recorderRef.current = recorder;
+
+      // Start timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      timerRef.current = setInterval(() => {
+        setRecordingTime((t) => t + 1);
+      }, 1000);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      setRecordingMode('file');
+    }
+  };
+
+  const handleStopRecording = async () => {
+    try {
+      if (recorderRef.current && recorderRef.current.isRecordingNow()) {
+        const audioBlob = recorderRef.current.stop();
+        const audioFile = blobToFile(audioBlob, 'voice-query.wav');
+        setRecordingMode(null);
+        void queryByVoice(audioFile);
+      }
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+    }
+  };
+
+  const handlePickVoiceFile = () => {
+    setRecordingMode('file');
     voiceInputRef.current?.click();
   };
 
@@ -100,6 +181,7 @@ export default function Home() {
     const file = event.target.files?.[0];
     if (!file) return;
     void queryByVoice(file);
+    setRecordingMode(null);
     event.target.value = '';
   };
 
@@ -279,28 +361,87 @@ export default function Home() {
               value={askText}
               onChange={(e) => setAskText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
-              disabled={isInitializing}
+              disabled={isInitializing || isRecordingVoice}
               className="flex-1 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-primary-500 dark:border-zinc-700 dark:bg-zinc-900"
             />
 
             <input ref={voiceInputRef} type="file" accept="audio/*" className="hidden" onChange={handleVoiceSelected} />
-            <button
-              onClick={handlePickVoice}
-              disabled={isQuerying || isInitializing}
-              className="rounded-xl border border-zinc-300 px-3 py-3 text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              title="Ask by voice"
-            >
-              <Mic size={18} />
-            </button>
+            
+            {!isRecordingVoice ? (
+              <button
+                onClick={handlePickVoice}
+                disabled={isQuerying || isInitializing}
+                className="rounded-xl border border-zinc-300 px-3 py-3 text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                title={canRecord ? "Record voice or upload audio file" : "Upload audio file"}
+              >
+                <Mic size={18} />
+              </button>
+            ) : (
+              <button
+                onClick={handleStopRecording}
+                className="animate-pulse rounded-xl border border-red-300 bg-red-50 px-3 py-3 text-red-500 transition dark:border-red-900 dark:bg-red-950/30"
+                title="Stop recording"
+              >
+                <Square size={18} />
+              </button>
+            )}
 
             <button
               onClick={handleAsk}
-              disabled={isQuerying || isInitializing || !askText.trim()}
+              disabled={isQuerying || isInitializing || !askText.trim() || isRecordingVoice}
               className="rounded-xl bg-primary-600 px-4 py-3 text-white transition hover:bg-primary-700 disabled:opacity-50"
             >
               <Send size={18} />
             </button>
           </div>
+          
+          {recordingMode && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-zinc-900">
+                <h3 className="mb-4 text-center text-lg font-semibold">Voice Input</h3>
+                
+                {!isRecordingVoice ? (
+                  <div className="space-y-3">
+                    {canRecord && (
+                      <button
+                        onClick={handleStartRecording}
+                        className="w-full rounded-xl bg-red-600 px-4 py-3 text-white transition hover:bg-red-700 flex items-center justify-center gap-2"
+                      >
+                        <Mic size={18} /> Start Recording
+                      </button>
+                    )}
+                    <button
+                      onClick={handlePickVoiceFile}
+                      className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                    >
+                      Upload Audio File
+                    </button>
+                    <button
+                      onClick={() => setRecordingMode(null)}
+                      className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-center gap-3">
+                      <div className="h-3 w-3 animate-pulse rounded-full bg-red-600"></div>
+                      <span className="text-sm font-medium">Recording...</span>
+                      <span className="text-sm text-zinc-500">{Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</span>
+                    </div>
+                    <button
+                      onClick={handleStopRecording}
+                      className="w-full rounded-xl bg-red-600 px-4 py-3 text-white transition hover:bg-red-700 flex items-center justify-center gap-2"
+                    >
+                      <Square size={18} /> Stop & Send
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">Mobile and laptop both support Ask, Save, Upload, and Resurface.</p>
         </footer>
       </main>
