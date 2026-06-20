@@ -58,6 +58,35 @@ const buildHeaders = (token: string | null) =>
       }
     : {};
 
+const parseApiErrorDetail = (error: unknown): string => {
+  if (!axios.isAxiosError(error)) {
+    return '';
+  }
+
+  const detail = error.response?.data?.detail;
+  if (typeof detail === 'string') {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const parsed = detail
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+        if (item && typeof item === 'object' && 'msg' in item && typeof item.msg === 'string') {
+          return item.msg;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('; ');
+    return parsed;
+  }
+
+  return '';
+};
+
 export const useStore = create<AppState>((set, get) => ({
   messages: [{ role: 'assistant', content: 'Hello! I am your Second Brain. How can I help you today?' }],
   isIngesting: false,
@@ -149,7 +178,6 @@ export const useStore = create<AppState>((set, get) => ({
       await axios.post(`${API_BASE}/ingest/file`, data, {
         headers: {
           ...buildHeaders(token),
-          'Content-Type': 'multipart/form-data',
         },
       });
 
@@ -164,9 +192,12 @@ export const useStore = create<AppState>((set, get) => ({
         clearStoredSessionToken();
         set({ sessionToken: null });
       }
+      const detail = parseApiErrorDetail(error);
       get().addMessage({
         role: 'assistant',
-        content: 'I could not ingest that file right now.'
+        content: detail
+          ? `I could not ingest that file right now. (${detail})`
+          : 'I could not ingest that file right now.'
       });
     } finally {
       set({ isIngesting: false });
@@ -222,7 +253,6 @@ export const useStore = create<AppState>((set, get) => ({
       const res = await axios.post(`${API_BASE}/voice/query`, data, {
         headers: {
           ...buildHeaders(token),
-          'Content-Type': 'multipart/form-data',
         },
       });
 
